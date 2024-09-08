@@ -124,9 +124,6 @@ class BucketStorage
 	 */
 	void swap(BucketStorage< T > &other) noexcept;
 
-	/*
-     * @brief
-	 */
 	friend void swap(BucketStorage< T > &first, BucketStorage< T > &second);
 
 	iterator get_to_distance(iterator it, difference_type distance);
@@ -139,6 +136,10 @@ class BucketStorage
 	iterator end() noexcept;
 	const_iterator end() const noexcept;
 	const_iterator cend() const noexcept;
+
+  private:
+	void prepareInsert();
+	void completeInsert();
 };
 
 // ------------------------------------------
@@ -352,13 +353,7 @@ BucketStorage<T>& BucketStorage< T >::operator=(BucketStorage< T > &&other) noex
 	return *this;
 }
 template< typename T >
-BucketStorage<T>::iterator BucketStorage< T >::insert(T &&value)
-{
-	// TODO: implementation
-	return BucketStorage::iterator();
-}
-template< typename T >
-BucketStorage<T>::iterator BucketStorage< T >::insert(const T &value)
+void BucketStorage< T >::prepareInsert()
 {
 	if (incomplete->isEnd()) {
 		if (last->getPrev() == nullptr)  {
@@ -367,12 +362,31 @@ BucketStorage<T>::iterator BucketStorage< T >::insert(const T &value)
 			incomplete = new Bucket(&generalContent, last->getPrev(), last);
 		}
 	}
-	auto temp =  incomplete->insert(value);
+}
+template< typename T >
+void BucketStorage< T >::completeInsert()
+{
 	if (incomplete->isFull()) {
 		incomplete = incomplete->getNextIncomplete();
 		incomplete->getPrevIncomplete()->setNextIncomplete(nullptr);
 		incomplete->setPrevIncomplete(nullptr);
 	}
+	++dataSize;
+}
+template< typename T >
+BucketStorage<T>::iterator BucketStorage< T >::insert(T &&value)
+{
+	prepareInsert();
+	auto temp =  incomplete->insert(std::move(value));
+	completeInsert();
+	return temp;
+}
+template< typename T >
+BucketStorage<T>::iterator BucketStorage< T >::insert(const T &value)
+{
+	prepareInsert();
+	auto temp =  incomplete->insert(value);
+	completeInsert();
 	return temp;
 }
 template< typename T >
@@ -383,7 +397,7 @@ BucketStorage<T>::iterator BucketStorage< T >::erase(BucketStorage::const_iterat
 template< typename T >
 bool BucketStorage< T >::empty() const noexcept
 {
-	return capacity() == dataSize;
+	return dataSize == 0;
 }
 template< typename T >
 BucketStorage<T>::size_type BucketStorage< T >::size() const noexcept
@@ -610,7 +624,6 @@ BucketStorage< T >::size_type BucketStorage< T >::Bucket::prepareInsert() {
 	checkFreeSpace();
 
 	size_type index;
-	// TODO: redo
 	if (isEmpty()) {
 		// Заполняем первый элемент
 		index = 0;
@@ -644,7 +657,7 @@ template< typename T >
 BucketStorage< T >::iterator BucketStorage< T >::Bucket::insert(T&& value)
 {
 	size_type index = prepareInsert();
-	data[index] = value;
+	data[index] = std::move(value);
 	return iterator(this, index);
 }
 template< typename T >
