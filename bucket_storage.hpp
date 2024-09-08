@@ -533,10 +533,10 @@ BucketStorage< T >::Bucket::Bucket(GeneralBucketContent* generalContent, Bucket*
 }
 template< typename T >
 BucketStorage<T>::Bucket::~Bucket() {
-	delete[] data;
-	delete[] nextData;
-	delete[] prevData;
-	delete[] idData;
+	free(data);
+	free(nextData);
+	free(prevData);
+	free(idData);
 
 	data = nullptr;
 	nextData = nullptr;
