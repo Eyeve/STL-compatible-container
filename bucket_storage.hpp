@@ -7,6 +7,7 @@
 #include <utility>
 #include <cstdint>
 
+#define SET_BIT(i) (0b1 << (i))
 #define DEFAULT_BLOCK_CAPACITY 64
 
 // ------------------------------------------
@@ -18,12 +19,12 @@ class BucketStorage
 {
 	template<bool isConst>
 	class AbstractIterator;
+	class Bucket;
+	class GeneralBucketContent;
+	enum class Flag: uint8_t;
 
 	template<bool isConst>
 	friend class AbstractIterator;
-
-	class Bucket;
-	class GeneralBucketContent;
 
   public:
 	using value_type = T;
@@ -34,13 +35,16 @@ class BucketStorage
 	using difference_type = std::ptrdiff_t;
 	using size_type = std::size_t;
 	using id_type = uint64_t;
+	using flag_type = std::underlying_type_t<Flag>;
 
   private:
 	GeneralBucketContent generalContent;
 	size_type dataSize;
+	size_type blocksCount;
 	Bucket* first;
 	Bucket* last;
 	Bucket* incomplete;
+	Flag flags;
 
   public:
 	/*
@@ -141,6 +145,9 @@ class BucketStorage
 	void prepareInsert();
 	void completeInsert();
 	void undoInsert();
+	void setFlag(Flag value);
+	void clearFlags();
+	bool isHaveFlag(Flag value);
 };
 
 // ------------------------------------------
@@ -149,15 +156,16 @@ class BucketStorage
 
 template< typename T >
 class BucketStorage<T>::GeneralBucketContent {
-	const size_type blockCapacity;
-	id_type idCounter;
+	size_type blockCapacity;
+	id_type idCounter; // TODO: swap
 
   public:
-	GeneralBucketContent(size_type blockCapacity = DEFAULT_BLOCK_CAPACITY);
+	explicit GeneralBucketContent(size_type blockCapacity = DEFAULT_BLOCK_CAPACITY);
 	GeneralBucketContent(const BucketStorage<T>::GeneralBucketContent& other);
 
-	size_type getBlockCapacity() const noexcept;
-	id_type id() noexcept;
+	void setBlockCapacity(size_type value) noexcept;
+	[[nodiscard]] size_type getBlockCapacity() const noexcept;
+	[[nodiscard]] id_type id() noexcept;
 };
 
 // ------------------------------------------
@@ -279,6 +287,17 @@ class BucketStorage< T >::AbstractIterator
 };
 
 // ------------------------------------------
+// START OF FLAGS IMPLEMENTATION
+// ------------------------------------------
+
+template< typename T >
+enum class BucketStorage<T>::Flag: uint8_t {
+	NO_FLAGS = 0,
+	BUCKET_CREATED = SET_BIT(0),
+	CAPACITY_POSITIVE = SET_BIT(1),
+};
+
+// ------------------------------------------
 // START OF GENERAL BUCKET CONTENT IMPLEMENTATION
 // ------------------------------------------
 
@@ -293,6 +312,11 @@ BucketStorage<T>::GeneralBucketContent::GeneralBucketContent(const BucketStorage
 	blockCapacity(other.blockCapacity),
 	idCounter(other.idCounter)
 {
+}
+template< typename T >
+void BucketStorage<T>::GeneralBucketContent::setBlockCapacity(size_type value) noexcept
+{
+	blockCapacity = value;
 }
 template< typename T >
 BucketStorage<T>::size_type BucketStorage<T>::GeneralBucketContent::getBlockCapacity() const noexcept {
@@ -311,8 +335,9 @@ template<typename T>
 BucketStorage<T>::BucketStorage():
 	generalContent(),
 	dataSize(0),
-	first(nullptr),
-	last(new Bucket()),
+	blocksCount(0),
+	first(new Bucket()),
+	last(first),
 	incomplete(last)
 {
 }
@@ -325,6 +350,7 @@ template< typename T >
 BucketStorage<T>::BucketStorage(BucketStorage< T > &&other) noexcept:
 	generalContent(other.generalContent),
 	dataSize(other.dataSize),
+	blocksCount(0),
 	first(other.first),
 	last(other.last),
 	incomplete(other.last)
@@ -335,9 +361,10 @@ template< typename T >
 BucketStorage<T>::BucketStorage(size_type block_capacity):
 	generalContent(block_capacity),
 	dataSize(0),
-	first(nullptr),
-	last(new Bucket()),
-	incomplete(last)
+	blocksCount(0),
+	first(new Bucket()),
+	last(first),
+	incomplete(first)
 {
 	if (block_capacity == 0) {
 		throw 2; // TODO: replace
@@ -361,15 +388,31 @@ BucketStorage<T>& BucketStorage< T >::operator=(BucketStorage< T > &&other) noex
 	return *this;
 }
 template< typename T >
+void BucketStorage< T >::setFlag(Flag value)
+{
+	flags = static_cast<Flag>(static_cast<flag_type>(flags) | static_cast<flag_type>(value));
+}
+template< typename T >
+void BucketStorage< T >::clearFlags()
+{
+	flags = Flag::NO_FLAGS;
+}
+template< typename T >
+bool BucketStorage< T >::isHaveFlag(Flag value)
+{
+	return static_cast<flag_type>(flags) & static_cast<flag_type>(value);
+}
+template< typename T >
 void BucketStorage< T >::prepareInsert()
 {
 	if (incomplete->isEnd()) {
-		if (last->getPrev() == nullptr)  {
+		if (empty()) {
 			incomplete = new Bucket(&generalContent, last);
 			first = incomplete;
 		} else {
 			incomplete = new Bucket(&generalContent, last->getPrev(), last);
 		}
+		++blocksCount;
 	}
 }
 template< typename T >
@@ -392,14 +435,16 @@ void BucketStorage< T >::undoInsert()
 		if (temp != nullptr) {
 			temp->setNext(last);
 		}
+		delete incomplete;
 		incomplete = last;
+		--blocksCount;
 	}
 }
 template< typename T >
 BucketStorage<T>::iterator BucketStorage< T >::insert(T &&value) try
 {
 	prepareInsert();
-	auto temp =  incomplete->insert(std::move(value));
+	auto temp = incomplete->insert(std::move(value));
 	completeInsert();
 	return temp;
 } catch (...) {
@@ -410,7 +455,7 @@ template< typename T >
 BucketStorage<T>::iterator BucketStorage< T >::insert(const T &value) try
 {
 	prepareInsert();
-	auto temp =  incomplete->insert(value);
+	auto temp = incomplete->insert(value);
 	completeInsert();
 	return temp;
 } catch (...) {
@@ -435,7 +480,7 @@ BucketStorage<T>::size_type BucketStorage< T >::size() const noexcept
 template< typename T >
 BucketStorage<T>::size_type BucketStorage< T >::capacity() const noexcept
 {
-	return generalContent.getBlockCapacity();
+	return generalContent.getBlockCapacity() * blocksCount;
 }
 template< typename T >
 void BucketStorage< T >::shrink_to_fit()
