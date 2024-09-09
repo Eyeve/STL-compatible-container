@@ -140,6 +140,7 @@ class BucketStorage
   private:
 	void prepareInsert();
 	void completeInsert();
+	void undoInsert();
 };
 
 // ------------------------------------------
@@ -223,6 +224,7 @@ class BucketStorage< T >::Bucket
   private:
 	void checkFreeSpace() const;
 	size_type prepareInsert();
+	void completeInsert(size_type index);
 	template< typename U >
 	[[nodiscard]] U* getMemory(size_type count) const;
 };
@@ -337,6 +339,9 @@ BucketStorage<T>::BucketStorage(size_type block_capacity):
 	last(new Bucket()),
 	incomplete(last)
 {
+	if (block_capacity == 0) {
+		throw 2; // TODO: replace
+	}
 }
 template< typename T >
 BucketStorage<T>::~BucketStorage()
@@ -345,6 +350,9 @@ BucketStorage<T>::~BucketStorage()
 template< typename T >
 BucketStorage<T>& BucketStorage< T >::operator=(const BucketStorage< T > &other)
 {
+	if (this == &other) {
+		return *this;
+	}
 	return *this;
 }
 template< typename T >
@@ -358,6 +366,7 @@ void BucketStorage< T >::prepareInsert()
 	if (incomplete->isEnd()) {
 		if (last->getPrev() == nullptr)  {
 			incomplete = new Bucket(&generalContent, last);
+			first = incomplete;
 		} else {
 			incomplete = new Bucket(&generalContent, last->getPrev(), last);
 		}
@@ -374,20 +383,39 @@ void BucketStorage< T >::completeInsert()
 	++dataSize;
 }
 template< typename T >
-BucketStorage<T>::iterator BucketStorage< T >::insert(T &&value)
+void BucketStorage< T >::undoInsert()
+{
+	if (incomplete->isEmpty()) {
+		Bucket* temp = incomplete->getPrev();
+		last->setPrevIncomplete(nullptr);
+		last->setPrev(temp);
+		if (temp != nullptr) {
+			temp->setNext(last);
+		}
+		incomplete = last;
+	}
+}
+template< typename T >
+BucketStorage<T>::iterator BucketStorage< T >::insert(T &&value) try
 {
 	prepareInsert();
 	auto temp =  incomplete->insert(std::move(value));
 	completeInsert();
 	return temp;
+} catch (...) {
+	undoInsert();
+	throw 3; // TODO: replace
 }
 template< typename T >
-BucketStorage<T>::iterator BucketStorage< T >::insert(const T &value)
+BucketStorage<T>::iterator BucketStorage< T >::insert(const T &value) try
 {
 	prepareInsert();
 	auto temp =  incomplete->insert(value);
 	completeInsert();
 	return temp;
+} catch (...) {
+	undoInsert();
+	throw 3; // TODO: replace
 }
 template< typename T >
 BucketStorage<T>::iterator BucketStorage< T >::erase(BucketStorage::const_iterator it)
@@ -438,32 +466,32 @@ BucketStorage<T>::size_type BucketStorage< T >::max_size()
 template< typename T >
 BucketStorage<T>::iterator BucketStorage< T >::begin() noexcept
 {
-	return BucketStorage::iterator();
+	return iterator(first, first->beginIndex());
 }
 template< typename T >
 BucketStorage<T>::const_iterator BucketStorage< T >::begin() const noexcept
 {
-	return BucketStorage::const_iterator();
+	return const_iterator(first, first->beginIndex());
 }
 template< typename T >
 BucketStorage<T>::const_iterator BucketStorage< T >::cbegin() const noexcept
 {
-	return BucketStorage::const_iterator();
+	return const_iterator(first, first->beginIndex());
 }
 template< typename T >
 BucketStorage<T>::iterator BucketStorage< T >::end() noexcept
 {
-	return BucketStorage::iterator();
+	return iterator(last, 0);
 }
 template< typename T >
 BucketStorage<T>::const_iterator BucketStorage< T >::end() const noexcept
 {
-	return BucketStorage::const_iterator();
+	return const_iterator(last, 0);
 }
 template< typename T >
 BucketStorage<T>::const_iterator BucketStorage< T >::cend() const noexcept
 {
-	return BucketStorage::const_iterator();
+	return const_iterator(last, 0);
 }
 
 // ------------------------------------------
@@ -560,32 +588,32 @@ BucketStorage<T>::Bucket::~Bucket() {
 template< typename T >
 BucketStorage< T >::size_type BucketStorage< T >::Bucket::beginIndex() const
 {
-
+	return firstIndex;
 }
 template< typename T >
 BucketStorage< T >::size_type BucketStorage< T >::Bucket::endIndex() const
 {
-
+	return lastIndex;
 }
 template< typename T >
 BucketStorage< T >::size_type BucketStorage< T >::Bucket::nextIndex(size_type index) const
 {
-
+	return nextData[index];
 }
 template< typename T >
 BucketStorage< T >::size_type BucketStorage< T >::Bucket::prevIndex(size_type index) const
 {
-
+	return prevData[index];
 }
 template< typename T >
 BucketStorage< T >::Bucket* BucketStorage< T >::Bucket::nextBucket() const
 {
-
+	return next;
 }
 template< typename T >
 BucketStorage< T >::Bucket* BucketStorage< T >::Bucket::prevBucket() const
 {
-
+	return prev;
 }
 template< typename T >
 bool BucketStorage< T >::Bucket::isEnd() const
@@ -621,36 +649,38 @@ void BucketStorage< T >::Bucket::checkFreeSpace() const
 }
 template< typename T >
 BucketStorage< T >::size_type BucketStorage< T >::Bucket::prepareInsert() {
-	checkFreeSpace();
+	checkFreeSpace(); // TODO: comment out
 
-	size_type index;
 	if (isEmpty()) {
 		// Заполняем первый элемент
-		index = 0;
 		firstIndex = 0;
 		lastIndex = 0;
-	} else if (nextData[lastIndex] == firstIndex) {
-		// Новый слой
-		index = size;
-	} else {
-		// Дозаполняем слои
-		index = nextData[lastIndex];
+		return 0;
 	}
-
-	++size;
+	if (nextData[lastIndex] == firstIndex) {
+		// Новый слой
+		return size;
+	}
+	// Дозаполняем слои
+	return nextData[lastIndex];
+}
+template< typename T >
+void BucketStorage< T >::Bucket::completeInsert(size_type index)
+{
 	nextData[index] = firstIndex;
 	prevData[index] = lastIndex;
 	idData[index] = generalContent->id();
 	nextData[lastIndex] = index;
 	prevData[firstIndex] = index;
 	lastIndex = index;
-	return index;
+	++size;
 }
 template< typename T >
 BucketStorage< T >::iterator BucketStorage< T >::Bucket::insert(const T& value)
 {
 	size_type index = prepareInsert();
 	data[index] = value;
+	completeInsert(index);
 	return iterator(this, index);
 }
 template< typename T >
@@ -658,6 +688,7 @@ BucketStorage< T >::iterator BucketStorage< T >::Bucket::insert(T&& value)
 {
 	size_type index = prepareInsert();
 	data[index] = std::move(value);
+	completeInsert(index);
 	return iterator(this, index);
 }
 template< typename T >
@@ -703,6 +734,7 @@ template<typename T>
 template<bool isConst>
 BucketStorage< T >::AbstractIterator<isConst> &BucketStorage< T >::AbstractIterator<isConst>::operator++()
 {
+	// TODO: handle out of bounds
 	if (index != bucket->endIndex()) {
 		index = bucket->nextIndex(index);
 	} else {
@@ -723,6 +755,7 @@ template<typename T>
 template<bool isConst>
 BucketStorage< T >::AbstractIterator<isConst> &BucketStorage< T >::AbstractIterator<isConst>::operator--()
 {
+	// TODO: handle out of bounds
 	if (index != bucket->beginIndex()) {
 		index = bucket->prevIndex(index);
 	} else {
