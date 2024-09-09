@@ -501,7 +501,16 @@ void swap(BucketStorage<T>& first, BucketStorage<T>& second)
 template< typename T >
 BucketStorage<T>::iterator BucketStorage< T >::get_to_distance(BucketStorage::iterator it, BucketStorage::difference_type distance)
 {
-	return BucketStorage::iterator();
+	iterator temp(it);
+	while (distance > 0) {
+		++temp;
+		--distance;
+	}
+	while (distance < 0) {
+		--temp;
+		++distance;
+	}
+	return temp;
 }
 template< typename T >
 BucketStorage<T>::size_type BucketStorage< T >::max_size()
@@ -762,8 +771,9 @@ template<typename T>
 template<bool isConst>
 BucketStorage< T >::AbstractIterator<isConst> &BucketStorage< T >::AbstractIterator<isConst>::operator=(const AbstractIterator &other)
 {
-	if (*this == other) {
-		return *this;
+	if (this != &other) {
+		bucket = other.bucket;
+		index = other.index;
 	}
 	return *this;
 }
