@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(STL-compatible-container)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 
 # Добавляем исходные файлы проекта
 add_executable(${PROJECT_NAME} tests.cpp)

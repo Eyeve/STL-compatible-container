@@ -133,9 +133,9 @@ class BucketStorage< T >::Bucket
 
   public:
 	Bucket();																  /* APPROVED */
-	Bucket(GeneralBucketContent* generalContent, Bucket* last);				  /* APPROVED */
-	Bucket(GeneralBucketContent* generalContent, Bucket* prev, Bucket* last); /* APPROVED */
-	~Bucket();																  /* APPROVED */
+	Bucket(GeneralBucketContent* generalContent, Bucket* next, Bucket* prev, Bucket* incomplete); /* APPROVED */
+  	Bucket(const Bucket& other, GeneralBucketContent* generalContent, Bucket* next, Bucket* prev);
+	~Bucket();
 
 	void setNext(Bucket* value) noexcept { next = value; }					   /* APPROVED */
 	void setPrev(Bucket* value) noexcept { prev = value; }					   /* APPROVED */
@@ -186,6 +186,7 @@ template< bool isConst >
 class BucketStorage< T >::AbstractIterator
 {
 	friend class BucketStorage;
+	using bucket_pointer = typename std::conditional_t<isConst, const Bucket*, Bucket*>;
 
   public:
 	using value_type = T;
@@ -266,15 +267,20 @@ BucketStorage< T >::BucketStorage() :
 }
 template< typename T >
 BucketStorage< T >::BucketStorage(const BucketStorage< T >& other) :
-	generalContent(other.generalContent.getBlockCapacity()), dataSize(other.dataSize), blocksCount(other.blocksCount),
-	first(nullptr), last(nullptr), incomplete(nullptr)
+	generalContent(other.generalContent), dataSize(other.dataSize), blocksCount(other.blocksCount),
+	first(new Bucket()), last(first), incomplete(first)
 {
-	// TODO: implementation (to complete)
-//	auto it = other.begin();
-//	first = new Bucket(*it.bucket);
-//	for (; it != other.end(); it.moveNextBucket())
-//	{
-//	}
+	if (!other.empty()) {
+		for (auto it = --other.end(); it != other.begin(); it.shiftPrevBucket())
+		{
+			first = new Bucket(*it.bucket, &generalContent, first, nullptr);
+			if (!first->isFull()) {
+				incomplete->setPrevIncomplete(first);
+				first->setNextIncomplete(incomplete);
+				incomplete = first;
+			}
+		}
+	}
 }
 template< typename T >
 BucketStorage< T >::BucketStorage(BucketStorage< T >&& other) noexcept :
@@ -300,11 +306,26 @@ BucketStorage< T >::~BucketStorage()
 template< typename T >
 BucketStorage< T >& BucketStorage< T >::operator=(const BucketStorage< T >& other)
 {
-	if (this != &other)
-	{
-		// TODO: clear all data
+	if (this == &other)
+		return *this;
+
+	clear();
+	if (!other.empty()) {
 		generalContent = other.generalContent;
 		dataSize = other.dataSize;
+		blocksCount = other.blocksCount;
+		if (other.begin() != other.end()) {
+
+		}
+		for (auto it = other.begin(); it != other.end(); ++it)
+		{
+			first = new Bucket(*it.bucket, &generalContent, first, nullptr);
+			if (!first->isFull()) {
+				incomplete->setPrevIncomplete(first);
+				first->setNextIncomplete(incomplete);
+				incomplete = first;
+			}
+		}
 	}
 	return *this;
 }
@@ -327,13 +348,9 @@ void BucketStorage< T >::prepareInsert()
 	/* APPROVED */
 	if (incomplete->isEnd())
 	{
+		incomplete = new Bucket(&generalContent, last, last->getPrev(), last);
 		if (empty())
-		{
-			incomplete = new Bucket(&generalContent, last);
 			first = incomplete;
-		}
-		else
-			incomplete = new Bucket(&generalContent, last->getPrev(), last);
 		++blocksCount;
 	}
 }
@@ -593,27 +610,39 @@ BucketStorage< T >::Bucket::Bucket() :
 {
 }
 template< typename T >
-BucketStorage< T >::Bucket::Bucket(GeneralBucketContent* generalContent, Bucket* last) :
-	generalContent(generalContent), id(generalContent->id()), next(last), prev(nullptr), nextIncomplete(last),
+BucketStorage< T >::Bucket::Bucket(GeneralBucketContent* generalContent, Bucket* next, Bucket* prev, Bucket* incomplete) :
+	generalContent(generalContent), id(generalContent->id()), next(next), prev(prev), nextIncomplete(incomplete),
 	prevIncomplete(nullptr), data(getMemory< T >(generalContent->getBlockCapacity())), size(0), firstIndex(0),
 	lastIndex(0), nextData(getMemory< size_type >(generalContent->getBlockCapacity())),
 	prevData(getMemory< size_type >(generalContent->getBlockCapacity())),
 	idData(getMemory< id_type >(generalContent->getBlockCapacity()))
 {
-	last->prev = this;
-	last->prevIncomplete = this;
+	if (next != nullptr)
+		next->prev = this;
+	if (prev != nullptr)
+		prev->next = this;
+	if (incomplete != nullptr)
+		incomplete->prevIncomplete = this;
 }
 template< typename T >
-BucketStorage< T >::Bucket::Bucket(GeneralBucketContent* generalContent, Bucket* prev, Bucket* last) :
-	generalContent(generalContent), id(generalContent->id()), next(last), prev(prev), nextIncomplete(last),
+BucketStorage< T >::Bucket::Bucket(const Bucket& other, GeneralBucketContent* generalContent, Bucket* next, Bucket* prev) :
+	generalContent(generalContent), id(generalContent->id()), next(next), prev(prev), nextIncomplete(nullptr),
 	prevIncomplete(nullptr), data(getMemory< T >(generalContent->getBlockCapacity())), size(0), firstIndex(0),
 	lastIndex(0), nextData(getMemory< size_type >(generalContent->getBlockCapacity())),
 	prevData(getMemory< size_type >(generalContent->getBlockCapacity())),
 	idData(getMemory< id_type >(generalContent->getBlockCapacity()))
 {
-	last->prev = this;
-	last->prevIncomplete = this;
-	prev->next = this;
+	if (next != nullptr)
+		next->prev = this;
+	if (prev != nullptr)
+		prev->next = this;
+
+	for (auto it = const_iterator(const_cast<Bucket*>(&other), other.getFirstIndex()); it.bucket == &other; ++it) {
+		new (&data[it.index]) T(*it);
+		nextData[it.index] = other.nextData[it.index];
+		prevData[it.index] = other.prevData[it.index];
+		idData[it.index] = other.idData[it.index];
+	}
 }
 template< typename T >
 BucketStorage< T >::Bucket::~Bucket()
@@ -817,9 +846,9 @@ template< bool isConst >
 BucketStorage< T >::AbstractIterator< isConst > BucketStorage< T >::AbstractIterator< isConst >::shiftNextBucket()
 {
 	/* APPROVED */
-	/*
-	 * If bucket is end then undefined behavior
-	 */
+	if (bucket->isEnd())
+		return *this;
+
 	auto temp = *this;
 	bucket = bucket->getNextBucket();
 	index = bucket->getFirstIndex();
@@ -830,12 +859,14 @@ template< bool isConst >
 BucketStorage< T >::AbstractIterator< isConst > BucketStorage< T >::AbstractIterator< isConst >::shiftPrevBucket()
 {
 	/* APPROVED */
-	/*
-	 * If bucket is begin then undefined behavior
-	 */
 	auto temp = *this;
-	bucket = bucket->getPrevBucket();
-	index = bucket->getLastIndex();
+	if (bucket->isBegin())
+		index = bucket->getFirstIndex();
+	else
+	{
+		bucket = bucket->getPrevBucket();
+		index = bucket->getLastIndex();
+	}
 	return temp;
 }
 template< typename T >
