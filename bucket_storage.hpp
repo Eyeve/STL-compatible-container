@@ -132,9 +132,9 @@ class BucketStorage< T >::Bucket
 	id_type* idData;
 
   public:
-	Bucket();																  /* APPROVED */
+	Bucket();																					  /* APPROVED */
 	Bucket(GeneralBucketContent* generalContent, Bucket* next, Bucket* prev, Bucket* incomplete); /* APPROVED */
-  	Bucket(const Bucket& other, GeneralBucketContent* generalContent, Bucket* next, Bucket* prev);
+	Bucket(const Bucket& other, GeneralBucketContent* generalContent, Bucket* next, Bucket* prev);
 	~Bucket();
 
 	void setNext(Bucket* value) noexcept { next = value; }					   /* APPROVED */
@@ -146,13 +146,15 @@ class BucketStorage< T >::Bucket
 	Bucket* getPrev() const noexcept { return prev; }					  /* APPROVED */
 	Bucket* getNextIncomplete() const noexcept { return nextIncomplete; } /* APPROVED */
 	Bucket* getPrevIncomplete() const noexcept { return prevIncomplete; } /* APPROVED */
-	[[nodiscard]] size_type getSize() const noexcept { return size; }	  /* APPROVED */
-	[[nodiscard]] size_type getFirstIndex() const noexcept;				  /* APPROVED */
-	[[nodiscard]] size_type getLastIndex() const noexcept;				  /* APPROVED */
-	[[nodiscard]] size_type getNextIndex(size_type index) const;		  /* APPROVED */
-	[[nodiscard]] size_type getPrevIndex(size_type index) const;		  /* APPROVED */
-	[[nodiscard]] Bucket* getNextBucket() const noexcept;				  /* APPROVED */
-	[[nodiscard]] Bucket* getPrevBucket() const noexcept;				  /* APPROVED */
+	[[nodiscard]] id_type getId() const noexcept { return id; }			  /* APPROVED */
+	[[nodiscard]] id_type getDataId(size_type index) { return idData[index]; }
+	[[nodiscard]] size_type getSize() const noexcept { return size; } /* APPROVED */
+	[[nodiscard]] size_type getFirstIndex() const noexcept;			  /* APPROVED */
+	[[nodiscard]] size_type getLastIndex() const noexcept;			  /* APPROVED */
+	[[nodiscard]] size_type getNextIndex(size_type index) const;	  /* APPROVED */
+	[[nodiscard]] size_type getPrevIndex(size_type index) const;	  /* APPROVED */
+	[[nodiscard]] Bucket* getNextBucket() const noexcept;			  /* APPROVED */
+	[[nodiscard]] Bucket* getPrevBucket() const noexcept;			  /* APPROVED */
 
 	[[nodiscard]] bool isBegin() const noexcept; /* APPROVED */
 	[[nodiscard]] bool isEnd() const noexcept;	 /* APPROVED */
@@ -186,7 +188,7 @@ template< bool isConst >
 class BucketStorage< T >::AbstractIterator
 {
 	friend class BucketStorage;
-	using bucket_pointer = typename std::conditional_t<isConst, const Bucket*, Bucket*>;
+	using bucket_pointer = typename std::conditional_t< isConst, const Bucket*, Bucket* >;
 
   public:
 	using value_type = T;
@@ -267,14 +269,16 @@ BucketStorage< T >::BucketStorage() :
 }
 template< typename T >
 BucketStorage< T >::BucketStorage(const BucketStorage< T >& other) :
-	generalContent(other.generalContent), dataSize(other.dataSize), blocksCount(other.blocksCount),
-	first(new Bucket()), last(first), incomplete(first)
+	generalContent(other.generalContent), dataSize(other.dataSize), blocksCount(other.blocksCount), first(new Bucket()),
+	last(first), incomplete(first)
 {
-	if (!other.empty()) {
+	if (!other.empty())
+	{
 		for (auto it = --other.end(); it != other.begin(); it.shiftPrevBucket())
 		{
 			first = new Bucket(*it.bucket, &generalContent, first, nullptr);
-			if (!first->isFull()) {
+			if (!first->isFull())
+			{
 				incomplete->setPrevIncomplete(first);
 				first->setNextIncomplete(incomplete);
 				incomplete = first;
@@ -310,17 +314,16 @@ BucketStorage< T >& BucketStorage< T >::operator=(const BucketStorage< T >& othe
 		return *this;
 
 	clear();
-	if (!other.empty()) {
+	if (!other.empty())
+	{
 		generalContent = other.generalContent;
 		dataSize = other.dataSize;
 		blocksCount = other.blocksCount;
-		if (other.begin() != other.end()) {
-
-		}
-		for (auto it = other.begin(); it != other.end(); ++it)
+		for (auto it = --other.end(); it != other.begin(); it.shiftPrevBucket())
 		{
 			first = new Bucket(*it.bucket, &generalContent, first, nullptr);
-			if (!first->isFull()) {
+			if (!first->isFull())
+			{
 				incomplete->setPrevIncomplete(first);
 				first->setNextIncomplete(incomplete);
 				incomplete = first;
@@ -332,6 +335,9 @@ BucketStorage< T >& BucketStorage< T >::operator=(const BucketStorage< T >& othe
 template< typename T >
 BucketStorage< T >& BucketStorage< T >::operator=(BucketStorage< T >&& other) noexcept
 {
+	if (this == &other)
+		return *this;
+
 	cleanup();
 	generalContent = other.generalContent;
 	dataSize = other.dataSize;
@@ -444,9 +450,7 @@ BucketStorage< T >::iterator BucketStorage< T >::erase(BucketStorage::const_iter
 	else if (it.bucket->getSize() == generalContent.getBlockCapacity() - 1)
 	{
 		if (it.bucket->getNextIncomplete() != nullptr || it.bucket->getPrevIncomplete() != nullptr)
-		{
 			throw 1;	// TODO: delete
-		}
 		incomplete->setPrevIncomplete(it.bucket);
 		it.bucket->setNextIncomplete(incomplete);
 		incomplete = it.bucket;
@@ -626,9 +630,9 @@ BucketStorage< T >::Bucket::Bucket(GeneralBucketContent* generalContent, Bucket*
 }
 template< typename T >
 BucketStorage< T >::Bucket::Bucket(const Bucket& other, GeneralBucketContent* generalContent, Bucket* next, Bucket* prev) :
-	generalContent(generalContent), id(generalContent->id()), next(next), prev(prev), nextIncomplete(nullptr),
-	prevIncomplete(nullptr), data(getMemory< T >(generalContent->getBlockCapacity())), size(0), firstIndex(0),
-	lastIndex(0), nextData(getMemory< size_type >(generalContent->getBlockCapacity())),
+	generalContent(generalContent), id(other.id), next(next), prev(prev), nextIncomplete(nullptr), prevIncomplete(nullptr),
+	data(getMemory< T >(generalContent->getBlockCapacity())), size(other.size), firstIndex(other.firstIndex),
+	lastIndex(other.lastIndex), nextData(getMemory< size_type >(generalContent->getBlockCapacity())),
 	prevData(getMemory< size_type >(generalContent->getBlockCapacity())),
 	idData(getMemory< id_type >(generalContent->getBlockCapacity()))
 {
@@ -637,7 +641,8 @@ BucketStorage< T >::Bucket::Bucket(const Bucket& other, GeneralBucketContent* ge
 	if (prev != nullptr)
 		prev->next = this;
 
-	for (auto it = const_iterator(const_cast<Bucket*>(&other), other.getFirstIndex()); it.bucket == &other; ++it) {
+	for (auto it = const_iterator(const_cast< Bucket* >(&other), other.getFirstIndex()); it.bucket == &other; ++it)
+	{
 		new (&data[it.index]) T(*it);
 		nextData[it.index] = other.nextData[it.index];
 		prevData[it.index] = other.prevData[it.index];
@@ -945,25 +950,29 @@ template< typename T >
 template< bool isConst >
 bool BucketStorage< T >::AbstractIterator< isConst >::operator<=(const AbstractIterator& other) const noexcept
 {
-	return false;
+	return *this < other || *this == other;
 }
 template< typename T >
 template< bool isConst >
 bool BucketStorage< T >::AbstractIterator< isConst >::operator<(const AbstractIterator& other) const noexcept
 {
-	return false;
+	if (bucket->getId() == other.bucket->getId())
+		return !bucket->isEnd() && bucket->getDataId(index) < other.bucket->getDataId(other.index);
+	return bucket->getId() < other.bucket->getId();
 }
 template< typename T >
 template< bool isConst >
 bool BucketStorage< T >::AbstractIterator< isConst >::operator>=(const AbstractIterator& other) const noexcept
 {
-	return false;
+	return *this > other || *this == other;
 }
 template< typename T >
 template< bool isConst >
 bool BucketStorage< T >::AbstractIterator< isConst >::operator>(const AbstractIterator& other) const noexcept
 {
-	return false;
+	if (bucket->getId() == other.bucket->getId())
+		return !bucket->isEnd() && bucket->getDataId(index) > other.bucket->getDataId(other.index);
+	return bucket->getId() > other.bucket->getId();
 }
 template< typename T >
 template< bool isConst >
