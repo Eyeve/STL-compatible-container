@@ -6,7 +6,7 @@
 #include <iterator>
 #include <limits>
 #include <utility>
-
+#include <vector>
 #define DEFAULT_BLOCK_CAPACITY 64
 
 // ------------------------------------------
@@ -46,8 +46,8 @@ class BucketStorage
 	BucketStorage();									/* APPROVED */
 	BucketStorage(const BucketStorage< T >& other);		/* APPROVED */
 	BucketStorage(BucketStorage< T >&& other) noexcept; /* APPROVED */
-	explicit BucketStorage(size_type block_capacity);
-	~BucketStorage();
+	explicit BucketStorage(size_type block_capacity);	/* APPROVED */
+	~BucketStorage();									/* APPROVED */
 
 	BucketStorage< T >& operator=(const BucketStorage< T >& other);
 	BucketStorage< T >& operator=(BucketStorage< T >&& other) noexcept;
@@ -64,7 +64,7 @@ class BucketStorage
 	void shrink_to_fit();
 	void clear();
 	void swap(BucketStorage< T >& other) noexcept;
-	friend void swap(BucketStorage< T >& first, BucketStorage< T >& second);
+	friend void swap(BucketStorage< T >& first, BucketStorage< T >& second) noexcept;
 
 	iterator get_to_distance(iterator it, difference_type distance);
 
@@ -185,6 +185,8 @@ template< typename T >
 template< bool isConst >
 class BucketStorage< T >::AbstractIterator
 {
+	friend class BucketStorage;
+
   public:
 	using value_type = T;
 	using reference = typename std::conditional_t< isConst, T const &, T& >;
@@ -197,8 +199,6 @@ class BucketStorage< T >::AbstractIterator
 	size_type index;
 
   public:
-	friend class BucketStorage;
-
 	AbstractIterator() = default;
 	AbstractIterator(const AbstractIterator& other);
 	~AbstractIterator() = default;
@@ -208,13 +208,13 @@ class BucketStorage< T >::AbstractIterator
 	AbstractIterator& operator++();
 	AbstractIterator operator--(int);
 	AbstractIterator& operator--();
-	bool operator==(const AbstractIterator& other) const;
-	bool operator!=(const AbstractIterator& other) const;
-	bool operator<=(const AbstractIterator& other) const;
-	bool operator<(const AbstractIterator& other) const;
-	bool operator>=(const AbstractIterator& other) const;
-	bool operator>(const AbstractIterator& other) const;
-	operator AbstractIterator< !isConst >() const;
+	bool operator==(const AbstractIterator& other) const noexcept;
+	bool operator!=(const AbstractIterator& other) const noexcept;
+	bool operator<=(const AbstractIterator& other) const noexcept;
+	bool operator<(const AbstractIterator& other) const noexcept;
+	bool operator>=(const AbstractIterator& other) const noexcept;
+	bool operator>(const AbstractIterator& other) const noexcept;
+	operator AbstractIterator< !isConst >() const noexcept;
 	reference operator*() const;
 	pointer operator->() const;
 
@@ -270,11 +270,11 @@ BucketStorage< T >::BucketStorage(const BucketStorage< T >& other) :
 	first(nullptr), last(nullptr), incomplete(nullptr)
 {
 	// TODO: implementation (to complete)
-	//	auto it = other.begin();
-	//	first = new Bucket(*it.bucket);
-	//	for (; it != other.end(); it.moveNextBucket())
-	//	{
-	//	}
+//	auto it = other.begin();
+//	first = new Bucket(*it.bucket);
+//	for (; it != other.end(); it.moveNextBucket())
+//	{
+//	}
 }
 template< typename T >
 BucketStorage< T >::BucketStorage(BucketStorage< T >&& other) noexcept :
@@ -312,11 +312,13 @@ template< typename T >
 BucketStorage< T >& BucketStorage< T >::operator=(BucketStorage< T >&& other) noexcept
 {
 	cleanup();
+	generalContent = other.generalContent;
+	dataSize = other.dataSize;
+	blocksCount = other.blocksCount;
 	first = other.first;
 	last = other.last;
 	incomplete = other.incomplete;
 	other.resetPointers();
-
 	return *this;
 }
 template< typename T >
@@ -466,26 +468,36 @@ void BucketStorage< T >::shrink_to_fit()
 template< typename T >
 void BucketStorage< T >::clear()
 {
-	auto it = begin();
-	while (it != end())
-		delete it.shiftNextBucket().bucket;
+	if (!empty())
+	{
+		auto it = begin();
+		while (it != end())
+			delete it.shiftNextBucket().bucket;
 
-	first = last;
-	incomplete = last;
+		first = last;
+		incomplete = last;
 
-	last->setPrev(nullptr);
-	last->setPrevIncomplete(nullptr);
+		last->setPrev(nullptr);
+		last->setPrevIncomplete(nullptr);
 
-	dataSize = 0;
-	blocksCount = 0;
+		dataSize = 0;
+		blocksCount = 0;
+	}
 }
 template< typename T >
 void BucketStorage< T >::swap(BucketStorage< T >& other) noexcept
 {
+	std::swap(generalContent, other.generalContent);
+	std::swap(dataSize, other.dataSize);
+	std::swap(blocksCount, other.blocksCount);
+	std::swap(first, other.first);
+	std::swap(last, other.last);
+	std::swap(incomplete, other.incomplete);
 }
 template< typename T >
-void swap(BucketStorage< T >& first, BucketStorage< T >& second)
+void swap(BucketStorage< T >& first, BucketStorage< T >& second) noexcept
 {
+	first.swap(second);
 }
 template< typename T >
 BucketStorage< T >::iterator BucketStorage< T >::get_to_distance(BucketStorage::iterator it, BucketStorage::difference_type distance)
@@ -550,12 +562,13 @@ void BucketStorage< T >::resetPointers()
 	first = nullptr;
 	last = nullptr;
 	incomplete = nullptr;
+	dataSize = 0;
 }
 template< typename T >
 void BucketStorage< T >::cleanup()
 {
 	clear();
-	delete last;
+	delete last;	// can be nullptr
 }
 
 // ------------------------------------------
@@ -737,7 +750,7 @@ BucketStorage< T >::iterator BucketStorage< T >::Bucket::insert(const T& value)
 {
 	/* APPROVED */
 	size_type index = prepareInsert();
-	data[index] = value;
+	new (&data[index]) T(value);
 	completeInsert(index);
 	return iterator(this, index);
 }
@@ -746,7 +759,7 @@ BucketStorage< T >::iterator BucketStorage< T >::Bucket::insert(T&& value)
 {
 	/* APPROVED */
 	size_type index = prepareInsert();
-	data[index] = std::move(value);
+	new (&data[index]) T(std::move(value));
 	completeInsert(index);
 	return iterator(this, index);
 }
@@ -885,45 +898,45 @@ BucketStorage< T >::AbstractIterator< isConst >& BucketStorage< T >::AbstractIte
 }
 template< typename T >
 template< bool isConst >
-bool BucketStorage< T >::AbstractIterator< isConst >::operator==(const AbstractIterator& other) const
+bool BucketStorage< T >::AbstractIterator< isConst >::operator==(const AbstractIterator& other) const noexcept
 {
 	/* APPROVED */
 	return bucket == other.bucket && index == other.index;
 }
 template< typename T >
 template< bool isConst >
-bool BucketStorage< T >::AbstractIterator< isConst >::operator!=(const AbstractIterator& other) const
+bool BucketStorage< T >::AbstractIterator< isConst >::operator!=(const AbstractIterator& other) const noexcept
 {
 	/* APPROVED */
 	return !(*this == other);
 }
 template< typename T >
 template< bool isConst >
-bool BucketStorage< T >::AbstractIterator< isConst >::operator<=(const AbstractIterator& other) const
+bool BucketStorage< T >::AbstractIterator< isConst >::operator<=(const AbstractIterator& other) const noexcept
 {
 	return false;
 }
 template< typename T >
 template< bool isConst >
-bool BucketStorage< T >::AbstractIterator< isConst >::operator<(const AbstractIterator& other) const
+bool BucketStorage< T >::AbstractIterator< isConst >::operator<(const AbstractIterator& other) const noexcept
 {
 	return false;
 }
 template< typename T >
 template< bool isConst >
-bool BucketStorage< T >::AbstractIterator< isConst >::operator>=(const AbstractIterator& other) const
+bool BucketStorage< T >::AbstractIterator< isConst >::operator>=(const AbstractIterator& other) const noexcept
 {
 	return false;
 }
 template< typename T >
 template< bool isConst >
-bool BucketStorage< T >::AbstractIterator< isConst >::operator>(const AbstractIterator& other) const
+bool BucketStorage< T >::AbstractIterator< isConst >::operator>(const AbstractIterator& other) const noexcept
 {
 	return false;
 }
 template< typename T >
 template< bool isConst >
-BucketStorage< T >::AbstractIterator< isConst >::operator AbstractIterator< !isConst >() const
+BucketStorage< T >::AbstractIterator< isConst >::operator AbstractIterator< !isConst >() const noexcept
 {
 	/* APPROVED */
 	return AbstractIterator< !isConst >(bucket, index);
